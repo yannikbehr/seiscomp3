@@ -29,7 +29,9 @@ import os
 import datetime
 from dateutil import tz
 import random
+import httplib
 
+from scvsmaglog_utils import MessageEncoder
 
 class Listener(seiscomp3.Client.Application):
 
@@ -71,8 +73,12 @@ class Listener(seiscomp3.Client.Application):
         self.password = None
         self.auth = False
         self.magThresh = 0.0
+
         # UserDisplay interface
         self.udevt = None
+
+        # HTTP interface
+        self.hif = None
 
     def handleTimeout(self):
         self.hb.send_hb()
@@ -155,6 +161,15 @@ class Listener(seiscomp3.Client.Application):
             self.report_directory = self.ei.absolutePath(self.configGetString("report.directory"))
         except:
             pass
+
+        try:
+            self.httpHost = self.configGetString("http.host")
+            self.httpPort = self.configGetInt("http.port")
+            self.httpScript = self.configGetString("http.script")
+            self.httpMsgFormat = self.configGetString("http.messageFormat")
+        except:
+            pass
+
         return True
 
     def init(self):
@@ -179,17 +194,30 @@ class Listener(seiscomp3.Client.Application):
             seiscomp3.Logging.info("Saving reports to disk has been DISABLED!")
         try:
             import ud_interface
-            self.udevt = ud_interface.CoreEventInfo(self.amqHost, self.amqPort,
-                                                    self.amqTopic, self.amqUser,
-                                                    self.amqPwd,
-                                                    self.amqMsgFormat)
+            self.udevt = ud_interface.UDConnection(self.amqHost, self.amqPort,
+                                                   self.amqTopic, self.amqUser,
+                                                   self.amqPwd)
+            self.udevt_enc = MessageEncoder(self.amqMsgFormat)
             self.hb = ud_interface.HeartBeat(self.amqHost, self.amqPort,
                                              self.amqHbTopic, self.amqUser,
                                              self.amqPwd, self.amqMsgFormat)
             self.enableTimer(5)
             seiscomp3.Logging.info('ActiveMQ interface is running.')
         except Exception, e:
+            self.udevt = None
             seiscomp3.Logging.warning('ActiveMQ interface cannot be loaded: %s' % e)
+
+        try:
+            from http_interface import HTTPInterface
+            self.hif = HTTPInterface(self.httpHost, self.httpPort,
+                                     self.httpScript)
+            self.hif_enc = MessageEncoder(self.httpMsgFormat)
+            seiscomp3.Logging.info('HTTP connection established to %s:%d' \
+                                   % (self.httpHost, self.httpPort))
+        except Exception, e:
+            self.hif = None
+            seiscomp3.Logging.debug('HTTP interface not active: %s' % e)
+
         return True
 
     def generateReport(self, evID):
@@ -418,7 +446,11 @@ class Listener(seiscomp3.Client.Application):
                     idx = sorted(self.event_dict[evID]['updates'].keys())[-1]
                     self.event_dict[evID]['updates'][idx]['likelihood'] = float(comment.text())
                     if self.udevt is not None:
-                        self.udevt.send(self.udevt.message_encoder(ep))
+                        self.udevt.send(self.udevt_enc.encode(ep))
+                    if self.hif is not None:
+                        status, reason = self.hif.send(self.hif_enc.encode(ep))
+                        seiscomp3.Logging.debug("HTTP response: %d %s" \
+                                                % (status, reason))
         except:
             info = traceback.format_exception(*sys.exc_info())
             for i in info: seiscomp3.Logging.error(i)

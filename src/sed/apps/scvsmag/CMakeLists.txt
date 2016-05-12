@@ -28,7 +28,7 @@ SC_INSTALL_INIT(${VSMAGLOG_TARGET} ../../../trunk/apps/templates/initd.py)
 
 IF(SC_GLOBAL_PYTHON_WRAPPER)
 # UD interface
-INSTALL(FILES ud_interface.py
+INSTALL(FILES ud_interface.py scvsmaglog_utils.py http_interface.py
 	DESTINATION ${PYTHON_LIBRARY_PATH}
 )
 SET(UD_DATA config/sc3ml_0.7__quakeml_1.2-RT_eewd.xsl
